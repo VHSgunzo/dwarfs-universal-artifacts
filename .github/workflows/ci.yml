@@ -1,0 +1,62 @@
+name: ⚙️ Download dwarfs-universal artifacts 📦
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * 0" #At 00:00 UTC on Sunday every Week
+
+jobs:
+  download_and_release:
+    name: Download dwarfs-universal artifacts (x86_64 and aarch64)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: main
+          filter: "blob:none"
+
+      - name: Download artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+            set -x ; set +e
+
+            REPO='mhx/dwarfs'
+            BRANCH='mhx/work'
+            ARTIFACTS='dwarfs-universal-*Linux-*-clang-O2'
+
+            RUNID="$(gh run list -R "$REPO" -s success -L 1 --json databaseId -b "$BRANCH"|grep -o '[0-9]*')"
+            echo "* [Workflow run](https://github.com/$REPO/actions/runs/$RUNID)" >> RELEASE_NOTE.md
+
+            gh run download "$RUNID" -R "$REPO" -p "$ARTIFACTS"
+
+            VERSION="$(ls -d $ARTIFACTS|awk -F'-' '{print $3"-"$4"-"$5; exit}')"
+            echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+            mkdir -p release||exit 1
+            for arch in aarch64 x86_64
+                do
+                    artname="$(ls -d $ARTIFACTS|grep -m1 "$arch")"
+                    echo artname=$artname
+                    if [ -d "$artname" ]
+                        then
+                            cp -fv "$artname/$artname" release/"$(sed "s|-$VERSION||g"<<<"$artname")"
+                            rm -rf "$artname"
+                        else
+                            echo "Artifacts for $arch not found!"
+                            exit 1
+                    fi
+            done
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ env.VERSION }}"
+          prerelease: false
+          draft: false
+          body_path: "RELEASE_NOTE.md"
+          files: release/*
